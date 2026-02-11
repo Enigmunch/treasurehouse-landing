@@ -193,15 +193,74 @@
     document.addEventListener('click',e=>{if(!mm.contains(e.target)&&!burger.contains(e.target))mm.classList.remove('open')});
     const obs=new IntersectionObserver(es=>{es.forEach(e=>{if(e.isIntersecting){e.target.classList.add('visible');obs.unobserve(e.target)}})},{threshold:0.1});
     $$('.reveal').forEach(el=>obs.observe(el));
+    // ── Butler Chat — Live Agent ──
+    const WORKER_URL = 'https://butler.treasurehouse.art'; // ← Your Cloudflare Worker URL
     const chatBody=$('#chatBody'),input=$('#chatInput'),sendBtn=$('#sendBtn'),chips=$('#chips');
-    function appendMsg(role,text){const w=document.createElement('div');w.className='msg '+role;if(role==='butler'){const a=document.createElement('div');a.className='avatar b';a.textContent='B';w.appendChild(a)}const b=document.createElement('div');b.className='bubble';b.textContent=text;w.appendChild(b);chatBody.appendChild(w);chatBody.scrollTop=chatBody.scrollHeight}
-    function butlerTyping(text,delay=500){const w=document.createElement('div');w.className='msg butler';const a=document.createElement('div');a.className='avatar b';a.textContent='B';w.appendChild(a);const d=document.createElement('div');d.className='typing-dots';d.innerHTML='<span></span><span></span><span></span>';w.appendChild(d);chatBody.appendChild(w);chatBody.scrollTop=chatBody.scrollHeight;setTimeout(()=>{w.removeChild(d);const b=document.createElement('div');b.className='bubble';b.textContent=text;w.appendChild(b);chatBody.scrollTop=chatBody.scrollHeight},delay)}
-    const replies={calls:"You'll never lose a customer to a missed call again. I pick up every call, 24/7, in 3 languages. I book appointments, answer questions, and send you a summary over morning coffee.\n\nShall we see how this works for your business, or is there something else on your mind?",noshow:"Empty tables are expensive \u2014 let's fix that. I send smart reminders, confirm bookings, and fill cancellations from a waitlist automatically.\n\nShall we look at how this would work for your venue, or would you like to explore something else?",faq:"Your team's time is worth more than repeating opening hours. I handle every routine question instantly \u2014 hours, menu, prices, directions, parking \u2014 so your staff focuses on the customers standing in front of them.\n\nWant to see me in action?",growth:"Let's get you customers while you sleep. I engage every visitor in seconds, qualify leads, book appointments, and follow up \u2014 in English, Portuguese, and Spanish.\n\nShall we see how this fits your business?",staff:"Pleasure to meet you. I never sleep, never quit, never call in sick, and I cost a fraction of a hire. I handle calls, chats, and bookings around the clock.\n\nShall we look at what I could do for your business specifically?"};
-    const followups=["Tell me a bit about your business \u2014 what do you do and roughly how many customers do you serve per day?","Based on what you've described, I'd recommend starting with our Multichannel plan at \u20AC350/month. Setup takes 3\u20135 business days. Shall I prepare a detailed proposal?","Perfect \u2014 could you share your email? I'll send a proposal within 24 hours.","You'll hear from us soon. Welcome to Treasure House."];
-    let chipsUsed=false,fIdx=0;
-    function triggerChip(key,txt){appendMsg('user',txt);chips.classList.add('hidden');chipsUsed=true;butlerTyping(replies[key],600);setTimeout(()=>{fIdx=0},700)}
-    function handleSend(text){const t=(text||'').trim();if(!t)return;appendMsg('user',t);input.value='';const disc=/discount|cheaper|lower|deal|reduce|price/i.test(t);if(!chipsUsed){butlerTyping(disc?"Ah \u2014 attempting to negotiate already. I admire the courage. Tell me what you do and how you currently get customers, and I'll see whether you deserve a discount... or whether you need the full service.":"Certainly. Tell me what kind of business you run (restaurant, clinic, agency, trades, etc.) and which channel hurts most \u2014 calls, messages, or your website.",600);return}if(disc){butlerTyping("A discount is possible \u2014 but only if you can convince me you don't need priority support. Tell me: how many inbound requests do you get per day, and when do you lose the most business?",600);return}if(fIdx<followups.length){butlerTyping(followups[fIdx],600);fIdx++}else{butlerTyping("Noted. If you'd like, tell me your busiest hours and your top three customer questions \u2014 I'll draft a deployment plan.",600)}}
-    $$('.chip').forEach(btn=>btn.addEventListener('click',()=>triggerChip(btn.dataset.key,btn.querySelector('strong').textContent)));
+    let conversationHistory=[];
+    let sessionId=localStorage.getItem('th_session')||crypto.randomUUID();
+    localStorage.setItem('th_session',sessionId);
+    let sending=false;
+
+    function appendMsg(role,text){
+      const w=document.createElement('div');w.className='msg '+role;
+      if(role==='butler'){const a=document.createElement('div');a.className='avatar b';a.textContent='B';w.appendChild(a)}
+      const b=document.createElement('div');b.className='bubble';b.textContent=text;w.appendChild(b);
+      chatBody.appendChild(w);chatBody.scrollTop=chatBody.scrollHeight;
+    }
+
+    function showTyping(){
+      const w=document.createElement('div');w.className='msg butler';w.id='typing-indicator';
+      const a=document.createElement('div');a.className='avatar b';a.textContent='B';w.appendChild(a);
+      const d=document.createElement('div');d.className='typing-dots';d.innerHTML='<span></span><span></span><span></span>';
+      w.appendChild(d);chatBody.appendChild(w);chatBody.scrollTop=chatBody.scrollHeight;
+    }
+
+    function hideTyping(){const t=$('#typing-indicator');if(t)t.remove();}
+
+    async function sendToButler(userText){
+      if(sending)return;
+      sending=true;
+      input.disabled=true;
+      sendBtn.disabled=true;
+
+      conversationHistory.push({role:'user',content:userText});
+      showTyping();
+
+      try{
+        const res=await fetch(WORKER_URL,{
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({messages:conversationHistory,session_id:sessionId}),
+        });
+        const data=await res.json();
+        hideTyping();
+        appendMsg('butler',data.reply);
+        conversationHistory.push({role:'assistant',content:data.reply});
+      }catch(err){
+        hideTyping();
+        appendMsg('butler','One moment — let me gather my thoughts. Could you try again?');
+        conversationHistory.pop(); // remove failed user message
+      }
+
+      sending=false;
+      input.disabled=false;
+      sendBtn.disabled=false;
+      input.focus();
+    }
+
+    function handleSend(text){
+      const t=(text||'').trim();if(!t)return;
+      appendMsg('user',t);input.value='';
+      chips.classList.add('hidden');
+      sendToButler(t);
+    }
+
+    $$('.chip').forEach(btn=>btn.addEventListener('click',()=>{
+      const txt=btn.querySelector('strong').textContent;
+      appendMsg('user',txt);input.value='';
+      chips.classList.add('hidden');
+      sendToButler(txt);
+    }));
     sendBtn.addEventListener('click',()=>handleSend(input.value));
     input.addEventListener('keydown',e=>{if(e.key==='Enter')handleSend(input.value)});
     $('#discountChallenge').addEventListener('click',()=>{setTimeout(()=>{input.value='Can you offer a discount?';input.focus()},500)});
