@@ -254,4 +254,8 @@
       chips.classList.add('hidden');
       sendToButler(txt);
     }));
-    sendBtn.addEventListener
+    sendBtn.addEventListener('click',()=>handleSend(input.value));
+    input.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();handleSend(input.value)}});
+  </script>
+</body>
+</html>
